@@ -1,0 +1,24 @@
+[package]
+name = "sumo-campaign-viewer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+
+# SOVD client for observing/driving
+sovd-client = { git = "ssh://git@github.com/sdv-playground/SOVDd.git", branch = "main" }
+
+# SUIT manifest parsing
+sumo-onboard = { git = "ssh://git@github.com/tr-sdv-sandbox/sumo-rs.git", branch = "main" }
+sumo-crypto = { git = "ssh://git@github.com/tr-sdv-sandbox/sumo-rs.git", branch = "main" }
+sumo-codec = { git = "ssh://git@github.com/tr-sdv-sandbox/sumo-rs.git", branch = "main" }
+
+# Campaign orchestrator (drive mode)
+sumo-sovd-orchestrator = { git = "ssh://git@github.com/sdv-playground/sumo-sovd.git", branch = "main" }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
