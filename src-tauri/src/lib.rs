@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::State;
 
+#[allow(unused_imports)]
+use sumo_crypto::RustCryptoBackend;
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -78,25 +81,31 @@ async fn connect(state: State<'_, AppState>, url: String) -> Result<Vec<EcuStatu
 /// Parse a SUIT manifest envelope and return structured info.
 #[tauri::command]
 async fn parse_manifest(data: Vec<u8>) -> Result<ManifestInfo, String> {
-    let crypto = sumo_crypto::RustCryptoBackend::new();
-    // Parse without validation (no trust anchor needed for inspection)
+    // Decode the CBOR envelope (no signature validation — inspection only)
     let envelope = sumo_codec::decode::decode_envelope(&data)
         .map_err(|e| format!("decode: {e:?}"))?;
 
-    let manifest = sumo_onboard::Manifest::from_envelope(envelope);
+    let m = &envelope.manifest;
+    let has_install = m.severable.install.is_some();
+    let has_validate = m.validate.is_some();
+    let has_invoke = m.invoke.is_some();
+
+    // Extract text fields if present
+    let text = m.severable.text.as_ref();
+    let tc = text.and_then(|t| t.components.get(&0));
 
     Ok(ManifestInfo {
-        sequence_number: manifest.sequence_number(),
-        security_version: manifest.security_version(0),
-        component_count: manifest.component_count(),
-        dependency_count: manifest.dependency_count(),
-        has_install: manifest.has_install(),
-        has_validate: manifest.has_validate(),
-        has_invoke: manifest.has_invoke(),
-        has_firmware: manifest.has_firmware(),
-        text_version: manifest.text_version(0).map(|s| s.to_string()),
-        text_vendor_name: manifest.text_vendor_name(0).map(|s| s.to_string()),
-        text_model_name: manifest.text_model_name(0).map(|s| s.to_string()),
+        sequence_number: m.sequence_number,
+        security_version: None, // Would need parameter extraction
+        component_count: m.common.components.len(),
+        dependency_count: m.common.dependencies.len(),
+        has_install,
+        has_validate,
+        has_invoke,
+        has_firmware: has_install || has_validate,
+        text_version: tc.and_then(|c| c.version.clone()),
+        text_vendor_name: tc.and_then(|c| c.vendor_name.clone()),
+        text_model_name: tc.and_then(|c| c.model_name.clone()),
     })
 }
 
