@@ -1,107 +1,134 @@
 # SUMO Campaign Viewer
 
-Real-time visualization tool for SUIT firmware update campaigns across multiple ECUs.
+Real-time visualization tool for [SUIT](https://datatracker.ietf.org/doc/draft-ietf-suit-manifest/) firmware update campaigns across multiple ECUs.
+
+## Quick Start
+
+```bash
+# Prerequisites: Node.js, Rust, Tauri 2 system deps
+./run.sh
+```
+
+Connect to your SOVD gateway (default `http://localhost:4000`).
 
 ## Modes
 
 ### Observe Mode
-Connects to an SOVD gateway and monitors an ongoing campaign driven by the onboard orchestrator. Shows real-time progress without interfering.
+Connects to an SOVD gateway and monitors an ongoing campaign driven by the onboard orchestrator. Shows real-time progress without interfering. Use this in production to watch updates roll out.
 
 ### Drive Mode
 Acts as the campaign orchestrator itself — for test bench and workshop use. Parses SUIT campaign manifests, drives per-ECU updates via SOVD, and provides interactive commit/rollback control.
 
-## Features
+## Views
 
-### Campaign View
-- Parse and visualize L1 campaign manifests (ECU targets, dependencies, command sequences)
-- Show install → validate → invoke sequence flow
-- Display security_version policy and anti-rollback state
-- Content-addressable firmware details (digest, size, encryption)
-
-### Per-ECU State Machine
-Real-time visualization of each ECU through the SOVD flash lifecycle:
+### ECU State Machine
+Each ECU shows its current phase in the flash lifecycle, color-coded:
 
 ```
-[Default] → [Programming] → [Security Unlock] → [Upload] → [Verify]
-    → [Flash] → [Finalize] → [Reset] → [Activated/Trial] → [Commit/Rollback]
+[Idle] → [Session] → [Security] → [Upload] → [Verify]
+   → [Flash] → [Finalize] → [Reset] → [Trial] → [Commit/Rollback]
 ```
 
-Color-coded states: pending (gray), active (blue), success (green), failed (red), trial (amber)
+| Color | Meaning |
+|-------|---------|
+| Gray | Idle / pending |
+| Blue | Active operation |
+| Amber | Awaiting action (reset, trial) |
+| Green | Committed (permanent) |
+| Red | Failed |
 
 ### Timeline
-- Horizontal timeline showing all ECUs
+Horizontal view showing all ECUs in the campaign. Visualizes:
 - Which ECU is doing what, when
-- Parallel vs sequential operations visible
-- Duration tracking per phase
+- Parallel vs sequential operations
+- Duration per phase
+- The "install all → verify all → invoke all" staged pattern
 
 ### Manifest Inspector
-- SUIT envelope structure (authentication, manifest, integrated payloads)
-- Command sequences (shared, install, validate, invoke) as a visual flow
-- Parameter details per component (vendor_id, class_id, digest, URI, security_version)
-- Text metadata (version, vendor name, model name)
-- Encryption info (algorithm, recipients, key IDs)
+Parses SUIT envelopes and displays:
+- Command sequences (shared, install, validate, invoke) as visual flow
+- Security version and sequence number
+- Component identifiers and dependencies
+- Text metadata (version, vendor, model)
+- Encryption status (algorithm, recipients)
 
 ### DID Dashboard
-- Standard UDS DIDs (F187-F19E) before/after update
+Standard UDS DIDs (F187-F19E) before and after update:
 - Version comparison (current vs target)
+- Supplier and part information
 - Security version floor tracking
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────┐
-│       Campaign Viewer (Tauri)       │
-│  ┌──────────┐  ┌─────────────────┐  │
-│  │ Manifest  │  │ Campaign State  │  │
-│  │ Parser    │  │ Tracker         │  │
-│  │ (WASM)    │  │ (polls SOVD)   │  │
-│  └──────────┘  └─────────────────┘  │
-│  ┌──────────────────────────────┐   │
-│  │ Visualization Components     │   │
-│  │ - ECU state machines         │   │
-│  │ - Timeline                   │   │
-│  │ - Manifest inspector         │   │
-│  │ - DID dashboard              │   │
-│  └──────────────────────────────┘   │
+│     SUMO Campaign Viewer (Tauri)    │
+│                                     │
+│  React Frontend                     │
+│  ├── ECU Cards (state machines)     │
+│  ├── Timeline (parallel view)       │
+│  ├── Manifest Inspector             │
+│  └── DID Dashboard                  │
+│                                     │
+│  Rust Backend (Tauri Commands)      │
+│  ├── connect() — discover ECUs      │
+│  ├── parse_manifest() — inspect     │
+│  ├── get_activation() — poll state  │
+│  └── [Drive] orchestrator           │
 └──────────────┬──────────────────────┘
                │ SOVD REST API
                ↓
-┌──────────────────────────────┐
-│   SOVD Gateway               │
-│   ├── ECU 1 (vm-mgr)        │
-│   ├── ECU 2 (UDS)           │
-│   └── ECU 3 (UDS)           │
-└──────────────────────────────┘
+┌──────────────────────────────────────┐
+│         SOVD Gateway                 │
+│  ├── ECU 1 (vm-mgr)                │
+│  ├── ECU 2 (UDS via SOVDd)         │
+│  └── ECU N                          │
+└──────────────────────────────────────┘
 ```
 
-### Drive Mode Additional Components
+## Development
 
-```
-┌─────────────────────────────────────┐
-│       Campaign Viewer (Drive)       │
-│  ┌──────────────────────────────┐   │
-│  │ sumo-sovd-orchestrator       │   │
-│  │ (embedded, drives campaign)  │   │
-│  └──────────────────────────────┘   │
-│  ┌──────────────────────────────┐   │
-│  │ Security Helper Client       │   │
-│  └──────────────────────────────┘   │
-└─────────────────────────────────────┘
+```bash
+./run.sh                    # Dev mode (hot reload)
+npm run tauri build         # Production build
 ```
 
-## Tech Stack
+### Prerequisites
 
-- **Frontend**: React + TypeScript (Tauri)
-- **Backend**: Rust (Tauri commands)
-  - sovd-client for SOVD API
-  - sumo-codec for manifest parsing
-  - sumo-sovd-orchestrator for drive mode
-- **Visualization**: React components with state machine diagrams
+- Node.js 18+
+- Rust toolchain
+- Tauri 2 system dependencies ([install guide](https://v2.tauri.app/start/prerequisites/))
+
+### Project Structure
+
+```
+src/                        # React frontend
+  ├── App.tsx               # Main UI components
+  ├── App.css               # Dark theme + state colors
+  └── index.css             # CSS variables
+src-tauri/                  # Rust backend
+  ├── src/lib.rs            # Tauri commands
+  ├── Cargo.toml            # Rust dependencies
+  └── tauri.conf.json       # Window config
+```
+
+## Campaign Flow (SUIT Standard)
+
+The viewer understands SUIT manifest command sequences:
+
+| Manifest Type | install | validate | invoke | Viewer Shows |
+|---|---|---|---|---|
+| Firmware | directive-copy | condition-image-match | directive-invoke | Full flash lifecycle |
+| CRL / Policy | — | — | — | "Policy applied" (no flash) |
+| Multi-ECU | process-dependency ×N | per-ECU verify | per-ECU invoke | Staged: install all → verify all → invoke all |
 
 ## Related Projects
 
-- [sumo-rs](https://github.com/tr-sdv-sandbox/sumo-rs) — SUIT manifest library
-- [sumo-sovd](https://github.com/sdv-playground/sumo-sovd) — Campaign orchestrator
-- [SOVDd](https://github.com/sdv-playground/SOVDd) — SOVD diagnostic server
-- [vm-mgr](https://github.com/sdv-playground/vm-mgr) — VM lifecycle manager
-- [SOVD Explorer](https://github.com/sdv-playground/SOVD-explorer) — General SOVD diagnostic GUI
+| Project | Description |
+|---------|-------------|
+| [sumo-rs](https://github.com/tr-sdv-sandbox/sumo-rs) | SUIT manifest library (Rust) |
+| [sumo-sovd](https://github.com/sdv-playground/sumo-sovd) | Campaign orchestrator over SOVD |
+| [vm-mgr](https://github.com/sdv-playground/vm-mgr) | VM lifecycle manager with SUIT |
+| [SOVDd](https://github.com/sdv-playground/SOVDd) | SOVD diagnostic server |
+| [SOVD Explorer](https://github.com/sdv-playground/SOVD-explorer) | General SOVD diagnostic GUI |
+| [SUMO specs](https://github.com/tr-sdv-sandbox/sumo) | Specifications and feature mapping |
