@@ -47,6 +47,27 @@
   color: white;
 }
 
+.connection-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.connection-dot.connected {
+  background: var(--success);
+}
+
+.connection-dot.disconnected {
+  background: var(--text-secondary);
+}
+
 .server-input {
   background: var(--bg-primary);
   border: 1px solid var(--border);
@@ -55,6 +76,36 @@
   padding: 0.4rem 0.8rem;
   font-size: 0.85rem;
   width: 280px;
+}
+
+.server-input:disabled {
+  opacity: 0.5;
+}
+
+.connect-btn {
+  background: var(--accent);
+  border: none;
+  color: white;
+  padding: 0.4rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.connect-btn:hover {
+  filter: brightness(1.1);
+}
+
+.connect-btn.connected {
+  background: var(--error);
+}
+
+.connect-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Main */
@@ -134,18 +185,43 @@
   font-weight: 500;
 }
 
-.ecu-version {
+.ecu-details {
+  margin-top: 0.25rem;
+}
+
+.ecu-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.15rem 0;
   font-size: 0.8rem;
+}
+
+.detail-label {
   color: var(--text-secondary);
 }
 
-.version-current {
+.detail-value {
   color: var(--text-primary);
   font-weight: 500;
+  font-family: monospace;
 }
 
 .version-prev {
   color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.rollback-yes {
+  color: var(--success);
+  font-weight: 400;
+  font-family: inherit;
+}
+
+.rollback-no {
+  color: var(--text-secondary);
+  font-weight: 400;
+  font-family: inherit;
 }
 
 .ecu-progress {
@@ -154,12 +230,21 @@
   background: var(--border);
   border-radius: 2px;
   overflow: hidden;
+  position: relative;
 }
 
 .progress-bar {
   height: 100%;
   background: var(--accent);
   transition: width 0.3s;
+}
+
+.progress-label {
+  position: absolute;
+  right: 0;
+  top: -16px;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
 }
 
 .ecu-error {
@@ -231,4 +316,35 @@
   font-size: 0.9rem;
   text-align: center;
   padding: 2rem;
+}
+
+/* Error banner */
+.error-banner {
+  background: rgba(248, 113, 113, 0.15);
+  border: 1px solid var(--error);
+  color: var(--error);
+  padding: 0.5rem 1rem;
+  margin: 0 1.5rem;
+  margin-top: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.error-dismiss {
+  background: none;
+  border: none;
+  color: var(--error);
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: 0 0.25rem;
+}
+
+/* ECU count badge */
+.ecu-count {
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-left: 0.5rem;
 }
