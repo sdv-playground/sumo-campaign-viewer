@@ -14,16 +14,9 @@
   justify-content: space-between;
 }
 
-.header h1 {
-  font-size: 1.1rem;
-  font-weight: 600;
-}
+.header h1 { font-size: 1.1rem; font-weight: 600; }
 
-.header-controls {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
+.header-controls { display: flex; align-items: center; gap: 1rem; }
 
 .mode-selector {
   display: flex;
@@ -42,31 +35,13 @@
   transition: all 0.2s;
 }
 
-.mode-btn.active {
-  background: var(--accent);
-  color: white;
-}
+.mode-btn.active { background: var(--accent); color: white; }
 
-.connection-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
+.connection-controls { display: flex; align-items: center; gap: 0.5rem; }
 
-.connection-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.connection-dot.connected {
-  background: var(--success);
-}
-
-.connection-dot.disconnected {
-  background: var(--text-secondary);
-}
+.connection-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.connection-dot.connected { background: var(--success); }
+.connection-dot.disconnected { background: var(--text-secondary); }
 
 .server-input {
   background: var(--bg-primary);
@@ -78,9 +53,7 @@
   width: 280px;
 }
 
-.server-input:disabled {
-  opacity: 0.5;
-}
+.server-input:disabled { opacity: 0.5; }
 
 .connect-btn {
   background: var(--accent);
@@ -91,22 +64,12 @@
   cursor: pointer;
   font-size: 0.85rem;
   font-weight: 500;
-  transition: all 0.2s;
   white-space: nowrap;
 }
 
-.connect-btn:hover {
-  filter: brightness(1.1);
-}
-
-.connect-btn.connected {
-  background: var(--error);
-}
-
-.connect-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.connect-btn:hover { filter: brightness(1.1); }
+.connect-btn.connected { background: var(--error); }
+.connect-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Main */
 .main {
@@ -133,190 +96,14 @@
   margin-bottom: 1rem;
 }
 
-/* ECU Cards */
-.ecu-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 1rem;
-}
-
-.ecu-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 1rem;
-}
-
-.ecu-header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-
-.ecu-name {
-  font-weight: 600;
-  font-size: 0.95rem;
-}
-
-.ecu-id {
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-}
-
-.ecu-phase {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.75rem;
-  border-left: 3px solid;
-  border-radius: 0 4px 4px 0;
-  background: rgba(255, 255, 255, 0.03);
-  margin-bottom: 0.5rem;
-}
-
-.phase-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.phase-label {
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-
-.ecu-details {
-  margin-top: 0.25rem;
-}
-
-.ecu-detail-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.15rem 0;
-  font-size: 0.8rem;
-}
-
-.detail-label {
-  color: var(--text-secondary);
-}
-
-.detail-value {
-  color: var(--text-primary);
-  font-weight: 500;
-  font-family: monospace;
-}
-
-.version-prev {
-  color: var(--text-secondary);
-  font-weight: 400;
-}
-
-.rollback-yes {
-  color: var(--success);
-  font-weight: 400;
-  font-family: inherit;
-}
-
-.rollback-no {
-  color: var(--text-secondary);
-  font-weight: 400;
-  font-family: inherit;
-}
-
-.ecu-progress {
-  margin-top: 0.5rem;
-  height: 4px;
-  background: var(--border);
-  border-radius: 2px;
-  overflow: hidden;
-  position: relative;
-}
-
-.progress-bar {
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.3s;
-}
-
-.progress-label {
-  position: absolute;
-  right: 0;
-  top: -16px;
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-}
-
-.ecu-error {
-  margin-top: 0.5rem;
-  font-size: 0.8rem;
-  color: var(--error);
-}
-
-/* Timeline */
-.timeline {
-  overflow-x: auto;
-}
-
-.timeline-header,
-.timeline-row {
-  display: flex;
-  gap: 2px;
-}
-
-.timeline-header {
-  margin-bottom: 4px;
-}
-
-.timeline-ecu-label {
-  width: 100px;
-  min-width: 100px;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-}
-
-.timeline-phase-label {
-  flex: 1;
-  text-align: center;
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  padding: 0.2rem 0;
-}
-
-.timeline-cell {
-  flex: 1;
-  height: 24px;
-  border-radius: 3px;
-  transition: all 0.3s;
-}
-
-.timeline-cell.pending {
-  background: var(--bg-card);
-}
-
-.timeline-cell.done {
-  background: var(--success);
-  opacity: 0.4;
-}
-
-.timeline-cell.active {
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-/* Manifest */
 .placeholder {
   color: var(--text-secondary);
   font-size: 0.9rem;
   text-align: center;
   padding: 2rem;
 }
+
+.ecu-count { font-weight: 400; color: var(--text-secondary); margin-left: 0.5rem; }
 
 /* Error banner */
 .error-banner {
@@ -339,12 +126,350 @@
   color: var(--error);
   cursor: pointer;
   font-size: 1.2rem;
-  padding: 0 0.25rem;
 }
 
-/* ECU count badge */
-.ecu-count {
-  font-weight: 400;
-  color: var(--text-secondary);
-  margin-left: 0.5rem;
+/* ==========================================================================
+   ECU Rows — full-width, split into info (left) + update state (right)
+   ========================================================================== */
+
+.ecu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
+
+.ecu-row {
+  display: flex;
+  background: var(--bg-card);
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+  overflow: hidden;
+}
+
+.ecu-row.updating {
+  border-left-color: var(--accent);
+}
+
+/* Left half: ECU identity & static properties */
+.ecu-info {
+  flex: 1;
+  display: flex;
+  padding: 0.75rem 1rem;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.ecu-identity {
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.ecu-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  display: block;
+}
+
+.ecu-id {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+
+.ecu-fields {
+  display: grid;
+  grid-template-columns: 65px 80px 50px 100px 60px 70px;
+  gap: 1rem;
+  align-items: center;
+}
+
+/* Vertical divider between info and update */
+.ecu-divider {
+  width: 1px;
+  background: var(--border);
+  align-self: stretch;
+  margin: 0.5rem 0;
+}
+
+/* ==========================================================================
+   Right half: State Machine Stepper
+   ========================================================================== */
+
+.state-machine {
+  width: 420px;
+  min-width: 380px;
+  padding: 0.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* Phase row (Transfer / Activation) */
+.sm-phase {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sm-phase-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.sm-steps {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+}
+
+/* Individual step: dot + connecting line + label below */
+.sm-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  min-width: 70px;
+}
+
+.sm-step .sm-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: transparent;
+  z-index: 1;
+  transition: all 0.3s;
+}
+
+.sm-step .sm-label {
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+  margin-top: 0.2rem;
+  white-space: nowrap;
+  transition: color 0.3s;
+}
+
+/* Connecting line between dots */
+.sm-step .sm-line {
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 5px);
+  width: calc(100% - 10px);
+  height: 2px;
+  background: var(--border);
+  transition: background 0.3s;
+}
+
+.sm-step .sm-line.done {
+  background: var(--success);
+}
+
+/* Step states */
+.sm-step.done .sm-dot {
+  background: var(--success);
+  border-color: var(--success);
+}
+.sm-step.done .sm-label {
+  color: var(--success);
+}
+
+.sm-step.current .sm-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+.sm-step.current .sm-label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.sm-step.error .sm-dot {
+  background: var(--error);
+  border-color: var(--error);
+  box-shadow: 0 0 6px var(--error);
+}
+.sm-step.error .sm-label {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.sm-step.future .sm-dot {
+  border-color: var(--border);
+  background: transparent;
+}
+
+.sm-step.idle .sm-dot {
+  border-color: var(--border);
+  background: transparent;
+  opacity: 0.4;
+}
+.sm-step.idle .sm-label {
+  opacity: 0.4;
+}
+
+/* Rollback branch — offset slightly */
+.sm-step.sm-rollback {
+  margin-left: -10px;
+  opacity: 0.5;
+}
+.sm-step.sm-rollback.current {
+  opacity: 1;
+}
+.sm-step.sm-rollback.current .sm-dot {
+  background: var(--warning);
+  border-color: var(--warning);
+  box-shadow: 0 0 6px var(--warning);
+}
+.sm-step.sm-rollback.current .sm-label {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+/* Progress bar within transfer phase */
+.sm-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0.25rem;
+}
+
+.progress-track {
+  flex: 1;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+
+.progress-pct {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-family: monospace;
+  min-width: 3ch;
+  text-align: right;
+}
+
+/* Committed DID ground truth */
+.sm-committed {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.15rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.15rem;
+}
+
+.sm-committed-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.sm-committed-value {
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.sm-committed-value.yes { color: var(--success); }
+.sm-committed-value.muted { color: var(--text-secondary); }
+
+.update-error {
+  font-size: 0.8rem;
+  color: var(--error);
+}
+
+/* Shared field style */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.field-label {
+  color: var(--text-secondary);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.field-value {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.field-value.mono { font-family: monospace; }
+.field-value.muted { color: var(--text-secondary); font-weight: 400; }
+.field-value.yes { color: var(--success); }
+
+/* State category text colors */
+.state-active { color: var(--accent); }
+.state-waiting { color: var(--warning); }
+.state-success { color: var(--success); }
+.state-error { color: var(--error); }
+.state-idle { color: var(--text-secondary); }
+
+/* ==========================================================================
+   State Changes Log
+   ========================================================================== */
+
+.log-panel {
+  flex: 1;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+.log-panel h2 { flex-shrink: 0; }
+
+.change-log {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 400px;
+}
+
+.log-table {
+  font-size: 0.8rem;
+  font-family: monospace;
+}
+
+.log-header-row {
+  display: grid;
+  grid-template-columns: 100px 120px 110px 1fr;
+  gap: 0.75rem;
+  padding: 0.3rem 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg-secondary);
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 100px 120px 110px 1fr;
+  gap: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.log-row:hover { background: rgba(255, 255, 255, 0.02); }
+.log-row.log-error { color: var(--error); }
+
+.log-col-time { color: var(--text-secondary); }
+.log-col-ecu { font-weight: 500; }
+.log-col-field { color: var(--text-secondary); }
+.log-col-value { word-break: break-word; }
+
+.log-prev { color: var(--text-secondary); }

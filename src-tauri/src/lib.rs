@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
@@ -7,7 +8,8 @@ use tokio::task::JoinHandle;
 #[allow(unused_imports)]
 use sumo_crypto::RustCryptoBackend;
 
-use sovd_client::flash::{FlashClient, TransferState, ActivationStateResponse};
+use sovd_client::flash::{FlashClient, TransferState};
+use sovd_client::SovdClient;
 
 // =============================================================================
 // Types
@@ -17,17 +19,33 @@ use sovd_client::flash::{FlashClient, TransferState, ActivationStateResponse};
 pub struct EcuStatus {
     pub id: String,
     pub name: String,
-    pub phase: String,
+    /// Raw transfer state from SOVD flash API (e.g. "transferring", "activated")
+    pub transfer_state: Option<String>,
+    /// Raw activation state from SOVD flash/activation API (e.g. "committed", "activated")
+    pub activation_state: Option<String>,
     pub version: Option<String>,
     pub previous_version: Option<String>,
     pub supports_rollback: bool,
     pub progress: Option<f64>,
     pub error: Option<String>,
+    /// Diagnostic parameters discovered via list_parameters + read_data
+    /// (e.g. active_bank, boot_count, committed — only present if ECU supports them)
+    pub diagnostics: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateChange {
+    pub timestamp: String,
+    pub ecu_id: String,
+    pub field: String,
+    pub value: String,
+    pub prev_value: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampaignStatus {
     pub ecus: Vec<EcuStatus>,
+    pub changes: Vec<StateChange>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +69,8 @@ struct EcuInfo {
     id: String,
     name: String,
     gateway_id: String,
+    /// Diagnostic parameter IDs discovered at connect time (e.g. "active_bank", "boot_count")
+    diagnostic_params: Vec<String>,
 }
 
 // =============================================================================
@@ -93,6 +113,12 @@ async fn connect(
     let mut ecus = Vec::new();
     let mut gateway_id = None;
 
+    // Diagnostic param IDs we care about (if the ECU exposes them)
+    const DIAG_PARAMS: &[&str] = &[
+        "active_bank", "committed", "boot_count",
+        "min_security_ver", "current_security_ver",
+    ];
+
     for comp in &components {
         // Try to discover sub-entity apps (works for gateways)
         match client.list_apps(&comp.id).await {
@@ -100,19 +126,24 @@ async fn connect(
                 // This component is a gateway with sub-entities
                 gateway_id = Some(comp.id.clone());
                 for app in apps {
+                    // Discover which diagnostic params this ECU supports
+                    let available = discover_params(&client, &comp.id, &app.id, DIAG_PARAMS).await;
                     ecus.push(EcuInfo {
                         id: app.id.clone(),
                         name: app.name.clone(),
                         gateway_id: comp.id.clone(),
+                        diagnostic_params: available,
                     });
                 }
             }
             _ => {
                 // Direct ECU (no sub-entities)
+                let available = discover_params_direct(&client, &comp.id, DIAG_PARAMS).await;
                 ecus.push(EcuInfo {
                     id: comp.id.clone(),
                     name: comp.name.clone(),
                     gateway_id: String::new(),
+                    diagnostic_params: available,
                 });
             }
         }
@@ -121,12 +152,14 @@ async fn connect(
     let initial_ecus: Vec<EcuStatus> = ecus.iter().map(|e| EcuStatus {
         id: e.id.clone(),
         name: e.name.clone(),
-        phase: "idle".into(),
+        transfer_state: None,
+        activation_state: None,
         version: None,
         previous_version: None,
         supports_rollback: false,
         progress: None,
         error: None,
+        diagnostics: HashMap::new(),
     }).collect();
 
     // Store state
@@ -211,26 +244,94 @@ async fn get_activation(
 // =============================================================================
 
 async fn poll_ecus_loop(app_handle: AppHandle, server_url: String, ecus: Vec<EcuInfo>) {
+    let sovd_client = match SovdClient::new(&server_url) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
     let mut interval = tokio::time::interval(Duration::from_millis(1500));
+    let mut prev_states: HashMap<String, EcuStatus> = HashMap::new();
 
     loop {
         interval.tick().await;
 
         let mut statuses = Vec::new();
+        let mut changes = Vec::new();
 
         for ecu in &ecus {
-            let status = poll_single_ecu(&server_url, ecu).await;
+            let status = poll_single_ecu(&server_url, &sovd_client, ecu).await;
+            let prev = prev_states.get(&ecu.id);
+            diff_ecu_status(prev, &status, &mut changes);
             statuses.push(status);
         }
 
-        let payload = CampaignStatus { ecus: statuses };
+        for s in &statuses {
+            prev_states.insert(s.id.clone(), s.clone());
+        }
+
+        let payload = CampaignStatus { ecus: statuses, changes };
         if app_handle.emit("campaign-state-update", &payload).is_err() {
-            break; // Window closed
+            break;
         }
     }
 }
 
-async fn poll_single_ecu(server_url: &str, ecu: &EcuInfo) -> EcuStatus {
+fn diff_ecu_status(prev: Option<&EcuStatus>, next: &EcuStatus, changes: &mut Vec<StateChange>) {
+    let ts = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
+
+    let mut check = |field: &str, prev_val: Option<&str>, next_val: Option<&str>| {
+        let p = prev_val.unwrap_or("");
+        let n = next_val.unwrap_or("");
+        if p != n && !n.is_empty() {
+            changes.push(StateChange {
+                timestamp: ts.clone(),
+                ecu_id: next.id.clone(),
+                field: field.to_string(),
+                value: n.to_string(),
+                prev_value: if p.is_empty() { None } else { Some(p.to_string()) },
+            });
+        }
+    };
+
+    check("Transfer", prev.and_then(|p| p.transfer_state.as_deref()), next.transfer_state.as_deref());
+    check("Activation", prev.and_then(|p| p.activation_state.as_deref()), next.activation_state.as_deref());
+    check("Version", prev.and_then(|p| p.version.as_deref()), next.version.as_deref());
+    check("Previous", prev.and_then(|p| p.previous_version.as_deref()), next.previous_version.as_deref());
+
+    // Diagnostics
+    let prev_diag = prev.map(|p| &p.diagnostics);
+    for (key, val) in &next.diagnostics {
+        let next_str = val.to_string();
+        let prev_str = prev_diag
+            .and_then(|d| d.get(key))
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        if next_str != prev_str && next_str != "null" {
+            changes.push(StateChange {
+                timestamp: ts.clone(),
+                ecu_id: next.id.clone(),
+                field: key.clone(),
+                value: next_str,
+                prev_value: if prev_str.is_empty() || prev_str == "null" { None } else { Some(prev_str) },
+            });
+        }
+    }
+
+    // Error
+    if let Some(err) = &next.error {
+        let prev_err = prev.and_then(|p| p.error.as_deref()).unwrap_or("");
+        if err != prev_err {
+            changes.push(StateChange {
+                timestamp: ts.clone(),
+                ecu_id: next.id.clone(),
+                field: "Error".to_string(),
+                value: err.clone(),
+                prev_value: None,
+            });
+        }
+    }
+}
+
+async fn poll_single_ecu(server_url: &str, sovd_client: &SovdClient, ecu: &EcuInfo) -> EcuStatus {
     let flash_client = if ecu.gateway_id.is_empty() {
         FlashClient::for_sovd(server_url, &ecu.id)
     } else {
@@ -244,6 +345,7 @@ async fn poll_single_ecu(server_url: &str, ecu: &EcuInfo) -> EcuStatus {
 
     // Check activation state
     let activation = flash_client.get_activation_state().await.ok();
+    let activation_state = activation.as_ref().map(|a| a.state.clone());
     let version = activation.as_ref().and_then(|a| a.active_version.clone());
     let prev_version = activation.as_ref().and_then(|a| a.previous_version.clone());
     let supports_rollback = activation.as_ref().map(|a| a.supports_rollback).unwrap_or(false);
@@ -251,35 +353,47 @@ async fn poll_single_ecu(server_url: &str, ecu: &EcuInfo) -> EcuStatus {
     // Check flash transfers
     let transfers = flash_client.list_transfers().await.ok();
 
-    let (phase, progress, error) = match transfers {
+    let (transfer_state, progress, error) = match transfers {
         Some(list) => {
-            // Find most recent active transfer, or fall back to latest
             let active = list.transfers.iter().rfind(|t| is_active_state(&t.state));
             let latest = active.or_else(|| list.transfers.last());
 
             match latest {
-                Some(t) => map_transfer_state(
-                    &t.state,
-                    &t.transfer_id,
-                    t.error.as_ref().map(|e| e.message.clone()),
-                    &flash_client,
-                    &activation,
-                ).await,
-                None => map_activation_only(&activation),
+                Some(t) => {
+                    let progress = if matches!(t.state, TransferState::Transferring | TransferState::Running) {
+                        flash_client.get_flash_status(&t.transfer_id).await.ok()
+                            .and_then(|s| s.progress)
+                            .and_then(|p| p.percent)
+                    } else {
+                        None
+                    };
+                    let error = if matches!(t.state, TransferState::Failed | TransferState::Error | TransferState::Aborted | TransferState::Invalid) {
+                        t.error.as_ref().map(|e| e.message.clone())
+                    } else {
+                        None
+                    };
+                    (Some(format!("{:?}", t.state).to_lowercase()), progress, error)
+                }
+                None => (None, None, None),
             }
         }
-        None => map_activation_only(&activation),
+        None => (None, None, None),
     };
+
+    // Read diagnostic parameters (only for params discovered at connect time)
+    let diagnostics = read_diagnostics(sovd_client, ecu).await;
 
     EcuStatus {
         id: ecu.id.clone(),
         name: ecu.name.clone(),
-        phase,
+        transfer_state,
+        activation_state,
         version,
         previous_version: prev_version,
         supports_rollback,
         progress,
         error,
+        diagnostics,
     }
 }
 
@@ -290,64 +404,71 @@ fn is_active_state(state: &TransferState) -> bool {
     )
 }
 
-async fn map_transfer_state(
-    state: &TransferState,
-    transfer_id: &str,
-    error: Option<String>,
-    flash_client: &FlashClient,
-    activation: &Option<ActivationStateResponse>,
-) -> (String, Option<f64>, Option<String>) {
-    match state {
-        TransferState::Queued | TransferState::Pending => ("session".into(), None, None),
-        TransferState::Preparing => ("security".into(), None, None),
-        TransferState::Transferring | TransferState::Running => {
-            let progress = flash_client.get_flash_status(transfer_id).await.ok()
-                .and_then(|s| s.progress)
-                .and_then(|p| p.percent);
-            ("flashing".into(), progress, None)
-        }
-        TransferState::AwaitingExit => ("finalizing".into(), None, None),
-        TransferState::AwaitingReset => ("resetting".into(), None, None),
-        TransferState::Activated => ("trial".into(), None, None),
-        TransferState::Committed => ("committed".into(), None, None),
-        TransferState::RolledBack => ("rolled_back".into(), None, None),
-        TransferState::Failed | TransferState::Error | TransferState::Aborted =>
-            ("failed".into(), None, error),
-        TransferState::Verified => ("verifying".into(), None, None),
-        TransferState::Complete | TransferState::Finished => map_activation_only(activation),
-        TransferState::Invalid => ("failed".into(), None, Some("verification failed".into())),
-    }
-}
-
-fn map_activation_only(
-    activation: &Option<ActivationStateResponse>,
-) -> (String, Option<f64>, Option<String>) {
-    match activation {
-        Some(a) => {
-            let phase = match a.state.as_str() {
-                "activated" => "trial",
-                "committed" => "committed",
-                "rolled_back" => "rolled_back",
-                "awaiting_reset" | "awaitingreset" => "resetting",
-                _ => "idle",
-            };
-            (phase.into(), None, None)
-        }
-        None => ("idle".into(), None, None),
-    }
-}
-
 fn idle_status(ecu: &EcuInfo) -> EcuStatus {
     EcuStatus {
         id: ecu.id.clone(),
         name: ecu.name.clone(),
-        phase: "idle".into(),
+        transfer_state: None,
+        activation_state: None,
         version: None,
         previous_version: None,
         supports_rollback: false,
         progress: None,
         error: None,
+        diagnostics: HashMap::new(),
     }
+}
+
+/// Discover which of the requested param IDs are available for a sub-entity ECU.
+async fn discover_params(
+    client: &SovdClient,
+    gateway_id: &str,
+    app_id: &str,
+    wanted: &[&str],
+) -> Vec<String> {
+    match client.list_sub_entity_parameters(gateway_id, app_id).await {
+        Ok(resp) => {
+            let available: Vec<String> = resp.items.iter()
+                .filter(|p| wanted.contains(&p.id.as_str()))
+                .map(|p| p.id.clone())
+                .collect();
+            available
+        }
+        Err(_) => vec![],
+    }
+}
+
+/// Discover which of the requested param IDs are available for a direct ECU.
+async fn discover_params_direct(
+    client: &SovdClient,
+    component_id: &str,
+    wanted: &[&str],
+) -> Vec<String> {
+    match client.list_parameters(component_id).await {
+        Ok(resp) => {
+            resp.items.iter()
+                .filter(|p| wanted.contains(&p.id.as_str()))
+                .map(|p| p.id.clone())
+                .collect()
+        }
+        Err(_) => vec![],
+    }
+}
+
+/// Read discovered diagnostic parameters for an ECU.
+async fn read_diagnostics(client: &SovdClient, ecu: &EcuInfo) -> HashMap<String, serde_json::Value> {
+    let mut result = HashMap::new();
+    for param_id in &ecu.diagnostic_params {
+        let resp = if ecu.gateway_id.is_empty() {
+            client.read_data(&ecu.id, param_id).await
+        } else {
+            client.read_sub_entity_data(&ecu.gateway_id, &ecu.id, param_id).await
+        };
+        if let Ok(data) = resp {
+            result.insert(param_id.clone(), data.value);
+        }
+    }
+    result
 }
 
 // =============================================================================
