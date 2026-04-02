@@ -117,6 +117,7 @@ async fn connect(
     const DIAG_PARAMS: &[&str] = &[
         "active_bank", "committed", "boot_count",
         "min_security_ver", "current_security_ver",
+        "guest_state", "heartbeat_seq",
     ];
 
     for comp in &components {
@@ -297,9 +298,13 @@ fn diff_ecu_status(prev: Option<&EcuStatus>, next: &EcuStatus, changes: &mut Vec
     check("Version", prev.and_then(|p| p.version.as_deref()), next.version.as_deref());
     check("Previous", prev.and_then(|p| p.previous_version.as_deref()), next.previous_version.as_deref());
 
-    // Diagnostics
+    // Diagnostics (skip noisy continuously-changing fields)
+    const NOISY_DIAG: &[&str] = &["heartbeat_seq"];
     let prev_diag = prev.map(|p| &p.diagnostics);
     for (key, val) in &next.diagnostics {
+        if NOISY_DIAG.contains(&key.as_str()) {
+            continue;
+        }
         let next_str = val.to_string();
         let prev_str = prev_diag
             .and_then(|d| d.get(key))

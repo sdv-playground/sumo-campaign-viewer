@@ -119,12 +119,69 @@ const DIAG_LABELS: Record<string, string> = {
   boot_count: "Boot Count",
   min_security_ver: "Min SecVer",
   current_security_ver: "SecVer",
+  guest_state: "Guest",
+  heartbeat_seq: "HB Seq",
 };
 
 function formatDiagValue(key: string, value: unknown): string {
   if (key === "committed") return value ? "yes" : "no";
   if (value === null || value === undefined) return "-";
   return String(value);
+}
+
+// Heartbeat indicator — tracks previous hb_seq to detect frozen state
+const lastHbSeq: Record<string, { seq: number; changed: number }> = {};
+
+function HeartbeatIndicator({ ecu }: { ecu: EcuState }) {
+  const guestState = ecu.diagnostics.guest_state as string | undefined;
+  const hbSeq = ecu.diagnostics.heartbeat_seq as number | undefined;
+
+  if (!guestState || guestState === "offline") {
+    return (
+      <div className="heartbeat-indicator offline" title="VM offline">
+        <div className="hb-dot" />
+        <span className="hb-label">Offline</span>
+      </div>
+    );
+  }
+
+  // Track heartbeat freshness
+  const now = Date.now();
+  const prev = lastHbSeq[ecu.id];
+  if (hbSeq !== undefined) {
+    if (!prev || prev.seq !== hbSeq) {
+      lastHbSeq[ecu.id] = { seq: hbSeq, changed: now };
+    }
+  }
+  const lastChange = lastHbSeq[ecu.id]?.changed ?? 0;
+  const stale = now - lastChange > 5000;
+
+  if (guestState === "running" && !stale) {
+    return (
+      <div className="heartbeat-indicator alive" title={`Running — HB #${hbSeq}`}>
+        <div className="hb-dot pulse" />
+        <span className="hb-label">Running</span>
+      </div>
+    );
+  }
+
+  if (stale && guestState === "running") {
+    return (
+      <div className="heartbeat-indicator frozen" title={`Heartbeat frozen at #${hbSeq}`}>
+        <div className="hb-dot" />
+        <span className="hb-label">Frozen</span>
+      </div>
+    );
+  }
+
+  // booting, degraded, shutting_down, etc.
+  const label = guestState.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return (
+    <div className="heartbeat-indicator transitioning" title={`${label} — HB #${hbSeq ?? "?"}`}>
+      <div className="hb-dot" />
+      <span className="hb-label">{label}</span>
+    </div>
+  );
 }
 
 // =============================================================================
@@ -281,6 +338,7 @@ function EcuRow({ ecu }: { ecu: EcuState }) {
             <span className="field-label">Min SecVer</span>
             <span className="field-value">{formatDiagValue("min_security_ver", ecu.diagnostics.min_security_ver)}</span>
           </div>
+          <HeartbeatIndicator ecu={ecu} />
         </div>
       </div>
 
