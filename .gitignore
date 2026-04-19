@@ -1,4 +1,9 @@
-node_modules/
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Build artifacts
 dist/
-target/
-*.lock
+
+# Rust target dir (tauri)
+src-tauri/target/
