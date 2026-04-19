@@ -1,3 +1,6 @@
+# Node
+node_modules/
+
 # TypeScript incremental build cache
 tsconfig.tsbuildinfo
 *.tsbuildinfo
@@ -5,5 +8,9 @@ tsconfig.tsbuildinfo
 # Build artifacts
 dist/
 
-# Rust target dir (tauri)
+# Rust / tauri
+target/
 src-tauri/target/
+
+# Cargo.lock (author's choice — not committed in this tauri app)
+*.lock
