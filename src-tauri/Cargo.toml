@@ -23,3 +23,12 @@ sumo-sovd-orchestrator = { git = "ssh://git@github.com/sdv-playground/sumo-sovd.
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+# Temporary: point sovd-* / sumo-sovd-orchestrator at local checkouts while
+# iterating on the FlashState rename. Remove once SOVDd + sumo-sovd are
+# committed + pushed.
+[patch."ssh://git@github.com/sdv-playground/SOVDd.git"]
+sovd-client = { path = "../../SOVDd/crates/sovd-client" }
+
+[patch."ssh://git@github.com/sdv-playground/sumo-sovd.git"]
+sumo-sovd-orchestrator = { path = "../../sumo-sovd/crates/orchestrator" }

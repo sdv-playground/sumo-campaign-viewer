@@ -405,7 +405,7 @@ async fn poll_single_ecu(server_url: &str, sovd_client: &SovdClient, ecu: &EcuIn
 fn is_active_state(state: &TransferState) -> bool {
     matches!(state,
         TransferState::Queued | TransferState::Preparing | TransferState::Transferring |
-        TransferState::Running | TransferState::AwaitingExit | TransferState::AwaitingReset
+        TransferState::Running | TransferState::AwaitingActivation | TransferState::AwaitingReboot
     )
 }
 
