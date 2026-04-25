@@ -410,6 +410,11 @@ function App() {
   const [logEntries, setLogEntries] = useState<StateChange[]>([]);
 
   useEffect(() => {
+    // React StrictMode (dev) and HMR re-run effects, so by the time the
+    // async `listen()` resolves the original mount may already have been
+    // torn down. Without `cancelled`, the leaked listener stays registered
+    // and every event lands twice in the log.
+    let cancelled = false;
     let unlisten: UnlistenFn | undefined;
 
     listen<BackendCampaignStatus>("campaign-state-update", (event) => {
@@ -420,10 +425,15 @@ function App() {
         setLogEntries((prev) => [...prev, ...event.payload.changes]);
       }
     }).then((fn) => {
-      unlisten = fn;
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
     });
 
     return () => {
+      cancelled = true;
       unlisten?.();
     };
   }, []);
