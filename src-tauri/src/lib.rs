@@ -406,7 +406,7 @@ fn is_active_state(state: &TransferState) -> bool {
     matches!(state,
         TransferState::Queued | TransferState::Preparing | TransferState::Transferring |
         TransferState::Running | TransferState::AwaitingActivation | TransferState::Validated |
-        TransferState::AwaitingReboot
+        TransferState::AwaitingReboot | TransferState::Verifying
     )
 }
 

@@ -61,7 +61,8 @@ function classifyState(state: string | undefined): StateCategory {
   if (["activated", "awaiting_reboot", "awaitingreboot", "rolled_back", "rolledback"].includes(s))
     return "waiting";
   if (["queued", "pending", "preparing", "transferring", "running",
-       "awaiting_activation", "awaitingactivation", "validated", "verified"].includes(s))
+       "awaiting_activation", "awaitingactivation", "validated", "verified",
+       "verifying"].includes(s))
     return "active";
   return "active";
 }
@@ -189,7 +190,7 @@ function HeartbeatIndicator({ ecu }: { ecu: EcuState }) {
 // =============================================================================
 
 const TRANSFER_STEPS = ["Queued", "Preparing", "Transferring", "AwaitingActivation"];
-const ACTIVATION_STEPS = ["AwaitingReboot", "Activated", "Committed"];
+const ACTIVATION_STEPS = ["AwaitingReboot", "Verifying", "Activated", "Committed"];
 
 function normalizeState(state: string): string {
   return state.replace(/_/g, "").toLowerCase();
