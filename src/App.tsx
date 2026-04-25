@@ -61,7 +61,7 @@ function classifyState(state: string | undefined): StateCategory {
   if (["activated", "awaiting_reboot", "awaitingreboot", "rolled_back", "rolledback"].includes(s))
     return "waiting";
   if (["queued", "pending", "preparing", "transferring", "running",
-       "awaiting_activation", "awaitingactivation", "verified"].includes(s))
+       "awaiting_activation", "awaitingactivation", "validated", "verified"].includes(s))
     return "active";
   return "active";
 }
