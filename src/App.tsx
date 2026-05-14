@@ -57,6 +57,7 @@ function classifyState(state: string | undefined): StateCategory {
   if (!state) return "idle";
   const s = state.toLowerCase();
   if (["failed", "error", "aborted", "invalid"].includes(s)) return "error";
+  if (["initial"].includes(s)) return "idle";
   if (["committed", "complete", "finished"].includes(s)) return "success";
   if (["activated", "awaiting_reboot", "awaitingreboot", "rolled_back", "rolledback"].includes(s))
     return "waiting";
