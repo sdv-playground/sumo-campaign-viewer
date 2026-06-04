@@ -8,8 +8,13 @@ use tokio::task::JoinHandle;
 #[allow(unused_imports)]
 use sumo_crypto::RustCryptoBackend;
 
-use sovd_client::flash::{FlashClient, TransferState};
+use sovd_client::flash::{FlashClient, UpdateStatusBody};
 use sovd_client::SovdClient;
+
+/// UDS DID `F189` — "Vehicle Manufacturer ECU Software Version Number"
+/// (ISO 14229 / ISO 17978-3 identData). Read as the installed firmware
+/// version. The DID hex is itself a valid SOVD param-id (`/data/F189`).
+const FW_VERSION_DID: &str = "F189";
 
 // =============================================================================
 // Types
@@ -19,12 +24,16 @@ use sovd_client::SovdClient;
 pub struct EcuStatus {
     pub id: String,
     pub name: String,
-    /// Raw transfer state from SOVD flash API (e.g. "transferring", "activated")
+    /// Display state derived from the `/updates` `UpdateStatusBody`
+    /// (`phase`+`status`+`substate`): one of "idle", "preparing",
+    /// "executing", "awaiting-verdict", "committed", "failed".
     pub transfer_state: Option<String>,
-    /// Raw activation state from SOVD flash/activation API (e.g. "committed", "activated")
+    /// Activation state — folded into `transfer_state` on the /updates
+    /// wire (no separate activation resource). Mirrors `transfer_state`
+    /// once the entry reaches the execute phase, else None.
     pub activation_state: Option<String>,
+    /// Installed firmware version, read from identData DID `F189`.
     pub version: Option<String>,
-    pub previous_version: Option<String>,
     pub supports_rollback: bool,
     pub progress: Option<f64>,
     pub error: Option<String>,
@@ -102,11 +111,11 @@ async fn connect(
 
     *state.server_url.lock().unwrap() = url.clone();
 
-    let client = sovd_client::SovdClient::new(&url)
-        .map_err(|e| format!("connect: {e}"))?;
+    let client = sovd_client::SovdClient::new(&url).map_err(|e| format!("connect: {e}"))?;
 
     // Discover top-level components, then probe each for sub-entities
-    let components = client.list_components()
+    let components = client
+        .list_components()
         .await
         .map_err(|e| format!("list components: {e}"))?;
 
@@ -115,9 +124,13 @@ async fn connect(
 
     // Diagnostic param IDs we care about (if the ECU exposes them)
     const DIAG_PARAMS: &[&str] = &[
-        "active_bank", "committed", "boot_count",
-        "min_security_ver", "current_security_ver",
-        "guest_state", "heartbeat_seq",
+        "active_bank",
+        "committed",
+        "boot_count",
+        "min_security_ver",
+        "current_security_ver",
+        "guest_state",
+        "heartbeat_seq",
     ];
 
     for comp in &components {
@@ -150,18 +163,20 @@ async fn connect(
         }
     }
 
-    let initial_ecus: Vec<EcuStatus> = ecus.iter().map(|e| EcuStatus {
-        id: e.id.clone(),
-        name: e.name.clone(),
-        transfer_state: None,
-        activation_state: None,
-        version: None,
-        previous_version: None,
-        supports_rollback: false,
-        progress: None,
-        error: None,
-        diagnostics: HashMap::new(),
-    }).collect();
+    let initial_ecus: Vec<EcuStatus> = ecus
+        .iter()
+        .map(|e| EcuStatus {
+            id: e.id.clone(),
+            name: e.name.clone(),
+            transfer_state: None,
+            activation_state: None,
+            version: None,
+            supports_rollback: false,
+            progress: None,
+            error: None,
+            diagnostics: HashMap::new(),
+        })
+        .collect();
 
     // Store state
     *state.gateway_id.lock().unwrap() = gateway_id;
@@ -192,8 +207,8 @@ async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
 /// Parse a SUIT manifest envelope and return structured info.
 #[tauri::command]
 async fn parse_manifest(data: Vec<u8>) -> Result<ManifestInfo, String> {
-    let envelope = sumo_codec::decode::decode_envelope(&data)
-        .map_err(|e| format!("decode: {e:?}"))?;
+    let envelope =
+        sumo_codec::decode::decode_envelope(&data).map_err(|e| format!("decode: {e:?}"))?;
 
     let m = &envelope.manifest;
     let has_install = m.severable.install.is_some();
@@ -218,7 +233,12 @@ async fn parse_manifest(data: Vec<u8>) -> Result<ManifestInfo, String> {
     })
 }
 
-/// Get activation state for a component.
+/// Get the `/updates` lifecycle status for a component.
+///
+/// Repurposed for the ISO 17978-3 §7.18 wire: attaches to the latest
+/// `/updates` entry on the component and returns its `UpdateStatusBody`
+/// (`{phase, status, progress?, step?, error?, x-sumo-substate?}`) as
+/// JSON. If the component has no updates, returns JSON `null`.
 #[tauri::command]
 async fn get_activation(
     state: State<'_, AppState>,
@@ -228,16 +248,28 @@ async fn get_activation(
     let gateway_id = state.gateway_id.lock().unwrap().clone();
 
     let flash_client = match &gateway_id {
-        Some(gw) if !gw.is_empty() => {
-            FlashClient::for_sovd_sub_entity(&url, gw, &component_id)
-        }
+        Some(gw) if !gw.is_empty() => FlashClient::for_sovd_sub_entity(&url, gw, &component_id),
         _ => FlashClient::for_sovd(&url, &component_id),
-    }.map_err(|e| format!("{e}"))?;
+    }
+    .map_err(|e| format!("{e}"))?;
 
-    let activation = flash_client.get_activation_state().await
-        .map_err(|e| format!("{e}"))?;
-
-    serde_json::to_value(&activation).map_err(|e| format!("{e}"))
+    // UpdateStatusBody is Deserialize-only (a wire shape); render the
+    // fields the frontend cares about into JSON by hand.
+    match latest_update_status(&flash_client).await {
+        Some(body) => {
+            let display_state = map_update_status(&body);
+            Ok(serde_json::json!({
+                "phase": body.phase,
+                "status": body.status,
+                "progress": body.progress,
+                "step": body.step,
+                "substate": body.substate,
+                "error": body.error.map(|e| e.message),
+                "display_state": display_state,
+            }))
+        }
+        None => Ok(serde_json::Value::Null),
+    }
 }
 
 // =============================================================================
@@ -269,7 +301,10 @@ async fn poll_ecus_loop(app_handle: AppHandle, server_url: String, ecus: Vec<Ecu
             prev_states.insert(s.id.clone(), s.clone());
         }
 
-        let payload = CampaignStatus { ecus: statuses, changes };
+        let payload = CampaignStatus {
+            ecus: statuses,
+            changes,
+        };
         if app_handle.emit("campaign-state-update", &payload).is_err() {
             break;
         }
@@ -288,15 +323,30 @@ fn diff_ecu_status(prev: Option<&EcuStatus>, next: &EcuStatus, changes: &mut Vec
                 ecu_id: next.id.clone(),
                 field: field.to_string(),
                 value: n.to_string(),
-                prev_value: if p.is_empty() { None } else { Some(p.to_string()) },
+                prev_value: if p.is_empty() {
+                    None
+                } else {
+                    Some(p.to_string())
+                },
             });
         }
     };
 
-    check("Transfer", prev.and_then(|p| p.transfer_state.as_deref()), next.transfer_state.as_deref());
-    check("Activation", prev.and_then(|p| p.activation_state.as_deref()), next.activation_state.as_deref());
-    check("Version", prev.and_then(|p| p.version.as_deref()), next.version.as_deref());
-    check("Previous", prev.and_then(|p| p.previous_version.as_deref()), next.previous_version.as_deref());
+    check(
+        "Transfer",
+        prev.and_then(|p| p.transfer_state.as_deref()),
+        next.transfer_state.as_deref(),
+    );
+    check(
+        "Activation",
+        prev.and_then(|p| p.activation_state.as_deref()),
+        next.activation_state.as_deref(),
+    );
+    check(
+        "Version",
+        prev.and_then(|p| p.version.as_deref()),
+        next.version.as_deref(),
+    );
 
     // Diagnostics (skip noisy continuously-changing fields)
     const NOISY_DIAG: &[&str] = &["heartbeat_seq"];
@@ -316,7 +366,11 @@ fn diff_ecu_status(prev: Option<&EcuStatus>, next: &EcuStatus, changes: &mut Vec
                 ecu_id: next.id.clone(),
                 field: key.clone(),
                 value: next_str,
-                prev_value: if prev_str.is_empty() || prev_str == "null" { None } else { Some(prev_str) },
+                prev_value: if prev_str.is_empty() || prev_str == "null" {
+                    None
+                } else {
+                    Some(prev_str)
+                },
             });
         }
     }
@@ -348,42 +402,36 @@ async fn poll_single_ecu(server_url: &str, sovd_client: &SovdClient, ecu: &EcuIn
         Err(_) => return idle_status(ecu),
     };
 
-    // Check activation state
-    let activation = flash_client.get_activation_state().await.ok();
-    let activation_state = activation.as_ref().map(|a| a.state.clone());
-    let version = activation.as_ref().and_then(|a| a.active_version.clone());
-    let prev_version = activation.as_ref().and_then(|a| a.previous_version.clone());
-    let supports_rollback = activation.as_ref().map(|a| a.supports_rollback).unwrap_or(false);
-
-    // Check flash transfers
-    let transfers = flash_client.list_transfers().await.ok();
-
-    let (transfer_state, progress, error) = match transfers {
-        Some(list) => {
-            let active = list.transfers.iter().rfind(|t| is_active_state(&t.state));
-            let latest = active.or_else(|| list.transfers.last());
-
-            match latest {
-                Some(t) => {
-                    let progress = if matches!(t.state, TransferState::Transferring | TransferState::Running) {
-                        flash_client.get_flash_status(&t.transfer_id).await.ok()
-                            .and_then(|s| s.progress)
-                            .and_then(|p| p.percent)
-                    } else {
-                        None
-                    };
-                    let error = if matches!(t.state, TransferState::Failed | TransferState::Error | TransferState::Aborted | TransferState::Invalid) {
-                        t.error.as_ref().map(|e| e.message.clone())
-                    } else {
-                        None
-                    };
-                    (Some(format!("{:?}", t.state).to_lowercase()), progress, error)
-                }
-                None => (None, None, None),
-            }
+    // Lifecycle state ← the latest /updates entry's UpdateStatusBody.
+    let status = latest_update_status(&flash_client).await;
+    let (transfer_state, activation_state, progress, error, supports_rollback) = match &status {
+        Some(body) => {
+            let display = map_update_status(body);
+            let progress = body.progress.map(|p| p as f64);
+            let error = body.error.as_ref().map(|e| e.message.clone());
+            // A banked trial paused awaiting a verdict is the only state
+            // where commit/rollback is applicable.
+            let supports_rollback = body.is_awaiting_verdict();
+            // Activation == the execute phase; mirror the display string
+            // once execute has begun, else leave None (transfer-only).
+            let activation_state = if body.phase == "execute" {
+                Some(display.clone())
+            } else {
+                None
+            };
+            (
+                Some(display),
+                activation_state,
+                progress,
+                error,
+                supports_rollback,
+            )
         }
-        None => (None, None, None),
+        None => (Some("idle".to_string()), None, None, None, false),
     };
+
+    // Installed firmware version ← identData DID F189 (the new wire).
+    let version = read_fw_version(sovd_client, ecu).await;
 
     // Read diagnostic parameters (only for params discovered at connect time)
     let diagnostics = read_diagnostics(sovd_client, ecu).await;
@@ -394,7 +442,6 @@ async fn poll_single_ecu(server_url: &str, sovd_client: &SovdClient, ecu: &EcuIn
         transfer_state,
         activation_state,
         version,
-        previous_version: prev_version,
         supports_rollback,
         progress,
         error,
@@ -402,12 +449,65 @@ async fn poll_single_ecu(server_url: &str, sovd_client: &SovdClient, ecu: &EcuIn
     }
 }
 
-fn is_active_state(state: &TransferState) -> bool {
-    matches!(state,
-        TransferState::Queued | TransferState::Preparing | TransferState::Transferring |
-        TransferState::Running | TransferState::AwaitingActivation | TransferState::Validated |
-        TransferState::AwaitingReboot | TransferState::Verifying
-    )
+/// Attach to the most-recent `/updates` entry on this component and fetch
+/// its `UpdateStatusBody`. Returns `None` when the component has no updates
+/// (idle) or any step of the list/attach/status round-trip fails.
+async fn latest_update_status(flash_client: &FlashClient) -> Option<UpdateStatusBody> {
+    let updates = flash_client.list_updates().await.ok()?;
+    let last_id = updates.last()?;
+    flash_client.attach(last_id).await.ok()?;
+    flash_client.spec_status().await.ok()
+}
+
+/// Map an `/updates` `UpdateStatusBody` to the viewer's lowercase display
+/// state string. The frontend keys its colour/stepper logic off these:
+///   no updates                          → "idle"   (caller; not reached here)
+///   prepare / *                         → "preparing"
+///   execute + inProgress + awaiting-verdict → "awaiting-verdict" (trial)
+///   execute + inProgress                → "executing"
+///   execute + completed                 → "committed"
+///   * + failed                          → "failed"
+fn map_update_status(body: &UpdateStatusBody) -> String {
+    if body.status == "failed" {
+        return "failed".to_string();
+    }
+    match body.phase.as_str() {
+        "prepare" => "preparing".to_string(),
+        "execute" => {
+            if body.is_awaiting_verdict() {
+                "awaiting-verdict".to_string()
+            } else if body.status == "completed" {
+                "committed".to_string()
+            } else {
+                "executing".to_string()
+            }
+        }
+        // Unknown phase: fall back to the raw status token, lowercased.
+        _ => body.status.to_lowercase(),
+    }
+}
+
+/// Read the installed firmware version from identData DID `F189`.
+/// Routes via `GET .../data/F189` (top-level) or the gateway apps path
+/// (sub-entity). Returns the value as a display string, or `None` if the
+/// ECU doesn't expose F189.
+async fn read_fw_version(client: &SovdClient, ecu: &EcuInfo) -> Option<String> {
+    let resp = if ecu.gateway_id.is_empty() {
+        client.read_data(&ecu.id, FW_VERSION_DID).await
+    } else {
+        client
+            .read_sub_entity_data(&ecu.gateway_id, &ecu.id, FW_VERSION_DID)
+            .await
+    }
+    .ok()?;
+
+    // identData is normally an ASCII version string; fall back to the raw
+    // JSON rendering (trimmed of quotes) for non-string encodings.
+    match resp.value {
+        serde_json::Value::String(s) if !s.is_empty() => Some(s),
+        serde_json::Value::Null => None,
+        other => Some(other.to_string()),
+    }
 }
 
 fn idle_status(ecu: &EcuInfo) -> EcuStatus {
@@ -417,7 +517,6 @@ fn idle_status(ecu: &EcuInfo) -> EcuStatus {
         transfer_state: None,
         activation_state: None,
         version: None,
-        previous_version: None,
         supports_rollback: false,
         progress: None,
         error: None,
@@ -434,7 +533,9 @@ async fn discover_params(
 ) -> Vec<String> {
     match client.list_sub_entity_parameters(gateway_id, app_id).await {
         Ok(resp) => {
-            let available: Vec<String> = resp.items.iter()
+            let available: Vec<String> = resp
+                .items
+                .iter()
                 .filter(|p| wanted.contains(&p.id.as_str()))
                 .map(|p| p.id.clone())
                 .collect();
@@ -451,24 +552,29 @@ async fn discover_params_direct(
     wanted: &[&str],
 ) -> Vec<String> {
     match client.list_parameters(component_id).await {
-        Ok(resp) => {
-            resp.items.iter()
-                .filter(|p| wanted.contains(&p.id.as_str()))
-                .map(|p| p.id.clone())
-                .collect()
-        }
+        Ok(resp) => resp
+            .items
+            .iter()
+            .filter(|p| wanted.contains(&p.id.as_str()))
+            .map(|p| p.id.clone())
+            .collect(),
         Err(_) => vec![],
     }
 }
 
 /// Read discovered diagnostic parameters for an ECU.
-async fn read_diagnostics(client: &SovdClient, ecu: &EcuInfo) -> HashMap<String, serde_json::Value> {
+async fn read_diagnostics(
+    client: &SovdClient,
+    ecu: &EcuInfo,
+) -> HashMap<String, serde_json::Value> {
     let mut result = HashMap::new();
     for param_id in &ecu.diagnostic_params {
         let resp = if ecu.gateway_id.is_empty() {
             client.read_data(&ecu.id, param_id).await
         } else {
-            client.read_sub_entity_data(&ecu.gateway_id, &ecu.id, param_id).await
+            client
+                .read_sub_entity_data(&ecu.gateway_id, &ecu.id, param_id)
+                .await
         };
         if let Ok(data) = resp {
             result.insert(param_id.clone(), data.value);

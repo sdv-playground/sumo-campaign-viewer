@@ -13,7 +13,6 @@ interface EcuState {
   transferState?: string;
   activationState?: string;
   version?: string;
-  previousVersion?: string;
   supportsRollback: boolean;
   progress?: number;
   error?: string;
@@ -35,7 +34,6 @@ interface BackendEcuStatus {
   transfer_state: string | null;
   activation_state: string | null;
   version: string | null;
-  previous_version: string | null;
   supports_rollback: boolean;
   progress: number | null;
   error: string | null;
@@ -57,11 +55,16 @@ function classifyState(state: string | undefined): StateCategory {
   if (!state) return "idle";
   const s = state.toLowerCase();
   if (["failed", "error", "aborted", "invalid"].includes(s)) return "error";
-  if (["initial"].includes(s)) return "idle";
+  if (["idle", "initial"].includes(s)) return "idle";
   if (["committed", "complete", "finished"].includes(s)) return "success";
-  if (["activated", "awaiting_reboot", "awaitingreboot", "rolled_back", "rolledback"].includes(s))
+  // /updates wire: a banked trial paused awaiting commit/rollback verdict.
+  if (["awaiting-verdict", "awaitingverdict", "activated",
+       "awaiting_reboot", "awaitingreboot", "rolled_back", "rolledback"].includes(s))
     return "waiting";
-  if (["queued", "pending", "preparing", "transferring", "running",
+  // /updates wire: prepare → executing. Legacy /flash tokens kept so an
+  // older gateway still renders sensibly.
+  if (["preparing", "executing",
+       "queued", "pending", "transferring", "running",
        "awaiting_activation", "awaitingactivation", "validated", "verified",
        "verifying"].includes(s))
     return "active";
@@ -103,7 +106,6 @@ function mapBackendEcu(ecu: BackendEcuStatus): EcuState {
     transferState: ecu.transfer_state ?? undefined,
     activationState: ecu.activation_state ?? undefined,
     version: ecu.version ?? undefined,
-    previousVersion: ecu.previous_version ?? undefined,
     supportsRollback: ecu.supports_rollback,
     progress: ecu.progress ?? undefined,
     error: ecu.error ?? undefined,
@@ -190,11 +192,16 @@ function HeartbeatIndicator({ ecu }: { ecu: EcuState }) {
 // State Machine Steps
 // =============================================================================
 
-const TRANSFER_STEPS = ["Queued", "Preparing", "Transferring", "AwaitingActivation"];
-const ACTIVATION_STEPS = ["AwaitingReboot", "Verifying", "Activated", "Committed"];
+// ISO 17978-3 §7.18 /updates lifecycle has two phases: prepare → execute.
+// Prepare validates the staged update; execute installs + (for a banked
+// trial) pauses at awaiting-verdict before the commit verdict lands.
+const TRANSFER_STEPS = ["Preparing"];
+const ACTIVATION_STEPS = ["Executing", "Awaiting Verdict", "Committed"];
 
 function normalizeState(state: string): string {
-  return state.replace(/_/g, "").toLowerCase();
+  // Strip separators (-, _, space) so "awaiting-verdict" and the step
+  // label "Awaiting Verdict" collapse to the same key.
+  return state.replace(/[-_\s]/g, "").toLowerCase();
 }
 
 function stepIndex(steps: string[], current: string | undefined): number {
@@ -216,18 +223,21 @@ function StateMachineStepper({ ecu }: { ecu: EcuState }) {
   const transferIdx = stepIndex(TRANSFER_STEPS, ecu.transferState);
   const activationIdx = stepIndex(ACTIVATION_STEPS, ecu.activationState);
   const hasError = ecu.error || classifyState(ecu.transferState) === "error" || classifyState(ecu.activationState) === "error";
-  const isRolledBack = ecu.activationState && normalizeState(ecu.activationState) === "rolledback";
+  // On the /updates wire a failed/rolled-back trial surfaces as the
+  // "failed" state rather than a distinct rolled-back activation token.
+  const isFailed = classifyState(ecu.transferState) === "error" || classifyState(ecu.activationState) === "error";
 
-  // Transfer is "done" if we've moved into activation phase or completed transfer
+  // Prepare is "done" once we've entered the execute phase (or it itself
+  // reported success).
   const transferDone = activationIdx >= 0 || (transferIdx >= 0 && classifyState(ecu.transferState) === "success");
-  // Activation is active if we have an activation state
+  // Execute is active if we have an execute-phase (activation) state.
   const activationActive = activationIdx >= 0;
 
   return (
     <div className="state-machine">
-      {/* Transfer phase */}
+      {/* Prepare phase */}
       <div className="sm-phase">
-        <span className="sm-phase-label">Transfer</span>
+        <span className="sm-phase-label">Prepare</span>
         <div className="sm-steps">
           {TRANSFER_STEPS.map((step, idx) => {
             let status: StepStatus;
@@ -258,29 +268,28 @@ function StateMachineStepper({ ecu }: { ecu: EcuState }) {
         )}
       </div>
 
-      {/* Activation phase */}
+      {/* Execute phase */}
       <div className="sm-phase">
-        <span className="sm-phase-label">Activation</span>
+        <span className="sm-phase-label">Execute</span>
         <div className="sm-steps">
           {ACTIVATION_STEPS.map((step, idx) => {
-            let status: StepStatus;
-            if (isRolledBack) {
-              status = "idle";
-            } else {
-              status = getStepStatus(idx, activationIdx, activationActive);
-            }
+            // A failed execute lights the error branch instead of marking
+            // any execute step as reached.
+            const status: StepStatus = isFailed
+              ? "idle"
+              : getStepStatus(idx, activationIdx, activationActive);
             return (
               <div key={step} className={`sm-step ${status}`}>
                 <div className="sm-dot" />
-                {idx < ACTIVATION_STEPS.length - 1 && <div className={`sm-line ${status === "done" || (idx < activationIdx && !isRolledBack) ? "done" : ""}`} />}
+                {idx < ACTIVATION_STEPS.length - 1 && <div className={`sm-line ${status === "done" || (idx < activationIdx && !isFailed) ? "done" : ""}`} />}
                 <span className="sm-label">{stateLabel(step)}</span>
               </div>
             );
           })}
-          {/* Rollback branch */}
-          <div className={`sm-step sm-rollback ${isRolledBack ? "current" : "future"}`}>
+          {/* Failure branch (rolled-back / failed trial) */}
+          <div className={`sm-step sm-rollback ${isFailed ? "current error" : "future"}`}>
             <div className="sm-dot" />
-            <span className="sm-label">Rolled Back</span>
+            <span className="sm-label">Failed</span>
           </div>
         </div>
       </div>

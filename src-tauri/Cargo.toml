@@ -10,31 +10,20 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 chrono = "0.4"
 
-# SOVD client for observing/driving
-sovd-client = { git = "ssh://git@github.com/sdv-playground/SOVDd.git", branch = "main" }
+# SOVD client for observing/driving. https:// to match the orchestrator's
+# transitive SOVDd source — the old ssh:// pin + ssh-only [patch] never
+# reached the orchestrator's https-pinned sovd-client, so after the /updates
+# wire landed the (current) orchestrator was built against a stale FlashClient.
+# One https source per crate; no local patch (SOVDd + sumo-sovd are pushed).
+sovd-client = { git = "https://github.com/sdv-playground/SOVDd.git", branch = "main" }
 
 # SUIT manifest parsing
-sumo-onboard = { git = "ssh://git@github.com/tr-sdv-sandbox/sumo-rs.git", branch = "main" }
-sumo-crypto = { git = "ssh://git@github.com/tr-sdv-sandbox/sumo-rs.git", branch = "main" }
-sumo-codec = { git = "ssh://git@github.com/tr-sdv-sandbox/sumo-rs.git", branch = "main" }
+sumo-onboard = { git = "https://github.com/tr-sdv-sandbox/sumo-rs.git", branch = "main" }
+sumo-crypto = { git = "https://github.com/tr-sdv-sandbox/sumo-rs.git", branch = "main" }
+sumo-codec = { git = "https://github.com/tr-sdv-sandbox/sumo-rs.git", branch = "main" }
 
 # Campaign orchestrator (drive mode)
-sumo-sovd-orchestrator = { git = "ssh://git@github.com/sdv-playground/sumo-sovd.git", branch = "main" }
+sumo-sovd-orchestrator = { git = "https://github.com/sdv-playground/sumo-sovd.git", branch = "main" }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-
-# Temporary: point sovd-* / sumo-sovd-orchestrator at local checkouts
-# while iterating on the FlashState rename. Patch all three sovd-* crates
-# so the FlashState enum is the same one everywhere (patching only
-# sovd-client leaves sovd-core/sovd-api at git HEAD and the build ends up
-# with two copies of sovd-core, which breaks at compile time if anything
-# imports FlashState directly). Remove once SOVDd + sumo-sovd are
-# committed + pushed.
-[patch."ssh://git@github.com/sdv-playground/SOVDd.git"]
-sovd-core = { path = "../../SOVDd/crates/sovd-core" }
-sovd-api = { path = "../../SOVDd/crates/sovd-api" }
-sovd-client = { path = "../../SOVDd/crates/sovd-client" }
-
-[patch."ssh://git@github.com/sdv-playground/sumo-sovd.git"]
-sumo-sovd-orchestrator = { path = "../../sumo-sovd/crates/orchestrator" }
