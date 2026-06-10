@@ -10,6 +10,7 @@ use sumo_crypto::RustCryptoBackend;
 
 use sovd_client::flash::{FlashClient, UpdateStatusBody};
 use sovd_client::SovdClient;
+use sovd_core::EntityStatus;
 
 /// UDS DID `F189` — "Vehicle Manufacturer ECU Software Version Number"
 /// (ISO 14229 / ISO 17978-3 identData). Read as the installed firmware
@@ -38,8 +39,22 @@ pub struct EcuStatus {
     pub progress: Option<f64>,
     pub error: Option<String>,
     /// Diagnostic parameters discovered via list_parameters + read_data
-    /// (e.g. active_bank, boot_count, committed — only present if ECU supports them)
+    /// (bank/security DIDs: active_bank, committed, min/current_security_ver —
+    /// only present if the ECU supports them). Guest liveness no longer lives
+    /// here; it moved to the typed `/status` fields below.
     pub diagnostics: HashMap<String, serde_json::Value>,
+    /// Guest runtime health from the converged `/status` endpoint
+    /// (ISO 17978-3 §7.19.2): `Some(true)` = `ready`, `Some(false)` =
+    /// `notReady`, `None` = `/status` unreachable (no liveness signal).
+    pub ready: Option<bool>,
+    /// `/status` `x-sumo-runtime.boot_id` — per-guest-lifetime nonce; a
+    /// changed value is the canonical (re)boot witness.
+    pub boot_id: Option<u32>,
+    /// `/status` `x-sumo-runtime.hb_seq` — heartbeat liveness counter
+    /// (advances ~1/s while the guest is alive).
+    pub hb_seq: Option<u32>,
+    /// `/status` `x-sumo-runtime.boot_count` — NV reset metric.
+    pub boot_count: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,15 +137,14 @@ async fn connect(
     let mut ecus = Vec::new();
     let mut gateway_id = None;
 
-    // Diagnostic param IDs we care about (if the ECU exposes them)
+    // Bank/security diagnostic DIDs (if the ECU exposes them). Guest liveness
+    // (guest_state, heartbeat_seq) and the boot_count metric now come from the
+    // converged `/status` endpoint, not per-DID reads.
     const DIAG_PARAMS: &[&str] = &[
         "active_bank",
         "committed",
-        "boot_count",
         "min_security_ver",
         "current_security_ver",
-        "guest_state",
-        "heartbeat_seq",
     ];
 
     for comp in &components {
@@ -175,6 +189,10 @@ async fn connect(
             progress: None,
             error: None,
             diagnostics: HashMap::new(),
+            ready: None,
+            boot_id: None,
+            hb_seq: None,
+            boot_count: None,
         })
         .collect();
 
@@ -348,13 +366,24 @@ fn diff_ecu_status(prev: Option<&EcuStatus>, next: &EcuStatus, changes: &mut Vec
         next.version.as_deref(),
     );
 
-    // Diagnostics (skip noisy continuously-changing fields)
-    const NOISY_DIAG: &[&str] = &["heartbeat_seq"];
+    // Liveness from `/status` (ISO 17978-3 §7.19.2). The fast-moving heartbeat
+    // `hb_seq` is deliberately NOT logged (it advances ~1/s — noise, like the
+    // old `heartbeat_seq`); `ready`, the reboot witness `boot_id`, and the NV
+    // `boot_count` are rare, meaningful transitions worth a log line.
+    let ready_label = |r: Option<bool>| r.map(|b| if b { "ready" } else { "notReady" });
+    check("Health", ready_label(prev.and_then(|p| p.ready)), ready_label(next.ready));
+
+    let prev_boot_id = prev.and_then(|p| p.boot_id).map(|v| v.to_string());
+    let next_boot_id = next.boot_id.map(|v| v.to_string());
+    check("Boot ID", prev_boot_id.as_deref(), next_boot_id.as_deref());
+
+    let prev_boot_count = prev.and_then(|p| p.boot_count).map(|v| v.to_string());
+    let next_boot_count = next.boot_count.map(|v| v.to_string());
+    check("Boot Count", prev_boot_count.as_deref(), next_boot_count.as_deref());
+
+    // Diagnostics (bank/security DIDs — all slow-changing, so log every change)
     let prev_diag = prev.map(|p| &p.diagnostics);
     for (key, val) in &next.diagnostics {
-        if NOISY_DIAG.contains(&key.as_str()) {
-            continue;
-        }
         let next_str = val.to_string();
         let prev_str = prev_diag
             .and_then(|d| d.get(key))
@@ -436,6 +465,10 @@ async fn poll_single_ecu(server_url: &str, sovd_client: &SovdClient, ecu: &EcuIn
     // Read diagnostic parameters (only for params discovered at connect time)
     let diagnostics = read_diagnostics(sovd_client, ecu).await;
 
+    // Guest liveness ← the converged `/status` endpoint (ISO 17978-3 §7.19.2):
+    // standard ready/notReady + the vendor `x-sumo-runtime` block.
+    let runtime = read_runtime_status(sovd_client, ecu).await;
+
     EcuStatus {
         id: ecu.id.clone(),
         name: ecu.name.clone(),
@@ -446,6 +479,43 @@ async fn poll_single_ecu(server_url: &str, sovd_client: &SovdClient, ecu: &EcuIn
         progress,
         error,
         diagnostics,
+        ready: runtime.ready,
+        boot_id: runtime.boot_id,
+        hb_seq: runtime.hb_seq,
+        boot_count: runtime.boot_count,
+    }
+}
+
+/// Guest liveness extracted from the converged `/status` endpoint.
+#[derive(Default)]
+struct RuntimeStatus {
+    ready: Option<bool>,
+    boot_id: Option<u32>,
+    hb_seq: Option<u32>,
+    boot_count: Option<u64>,
+}
+
+/// Read a component's runtime status from the converged `/status` endpoint
+/// (ISO 17978-3 §7.19.2): the standard `ready`/`notReady` plus the vendor
+/// `x-sumo-runtime` block (`boot_id`, `hb_seq`, `boot_count`).
+///
+/// `/status` is a top-level entity resource — there is no sub-entity
+/// `GET /apps/{id}/status` read on the SOVD wire — so this addresses the
+/// component by its own id (the managed-cvc guests are registered as
+/// top-level components). A gateway child, or an unreachable guest, yields a
+/// default (all-`None`) status and the liveness fields simply stay absent.
+async fn read_runtime_status(client: &SovdClient, ecu: &EcuInfo) -> RuntimeStatus {
+    let body = match client.read_status(&ecu.id).await {
+        Ok(b) => b,
+        Err(_) => return RuntimeStatus::default(),
+    };
+    let runtime = body.extensions.get("x-sumo-runtime");
+    let field_u64 = |key: &str| runtime.and_then(|r| r.get(key)).and_then(|v| v.as_u64());
+    RuntimeStatus {
+        ready: Some(matches!(body.status, EntityStatus::Ready)),
+        boot_id: field_u64("boot_id").map(|v| v as u32),
+        hb_seq: field_u64("hb_seq").map(|v| v as u32),
+        boot_count: field_u64("boot_count"),
     }
 }
 
@@ -521,6 +591,10 @@ fn idle_status(ecu: &EcuInfo) -> EcuStatus {
         progress: None,
         error: None,
         diagnostics: HashMap::new(),
+        ready: None,
+        boot_id: None,
+        hb_seq: None,
+        boot_count: None,
     }
 }
 

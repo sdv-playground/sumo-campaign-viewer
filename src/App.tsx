@@ -17,6 +17,11 @@ interface EcuState {
   progress?: number;
   error?: string;
   diagnostics: Record<string, unknown>;
+  // Guest liveness from the converged /status endpoint (ISO 17978-3 §7.19.2).
+  ready?: boolean; // status: ready (true) / notReady (false)
+  bootId?: number; // x-sumo-runtime.boot_id — per-lifetime nonce (reboot signal)
+  hbSeq?: number; // x-sumo-runtime.hb_seq — heartbeat liveness counter
+  bootCount?: number; // x-sumo-runtime.boot_count — NV reset metric
 }
 
 interface StateChange {
@@ -38,6 +43,10 @@ interface BackendEcuStatus {
   progress: number | null;
   error: string | null;
   diagnostics: Record<string, unknown>;
+  ready: boolean | null;
+  boot_id: number | null;
+  hb_seq: number | null;
+  boot_count: number | null;
 }
 
 interface BackendCampaignStatus {
@@ -110,6 +119,10 @@ function mapBackendEcu(ecu: BackendEcuStatus): EcuState {
     progress: ecu.progress ?? undefined,
     error: ecu.error ?? undefined,
     diagnostics: ecu.diagnostics ?? {},
+    ready: ecu.ready ?? undefined,
+    bootId: ecu.boot_id ?? undefined,
+    hbSeq: ecu.hb_seq ?? undefined,
+    bootCount: ecu.boot_count ?? undefined,
   };
 }
 
@@ -117,14 +130,14 @@ function mapBackendEcu(ecu: BackendEcuStatus): EcuState {
 // Diagnostic labels
 // =============================================================================
 
+// Bank/security diagnostic DIDs still read per-DID. Liveness (guest_state,
+// heartbeat_seq) and boot_count moved to the typed /status fields, so they're
+// no longer keyed here; their change-log entries use plain titles.
 const DIAG_LABELS: Record<string, string> = {
   active_bank: "Bank",
   committed: "Committed",
-  boot_count: "Boot Count",
   min_security_ver: "Min SecVer",
   current_security_ver: "SecVer",
-  guest_state: "Guest",
-  heartbeat_seq: "HB Seq",
 };
 
 function formatDiagValue(key: string, value: unknown): string {
@@ -137,53 +150,52 @@ function formatDiagValue(key: string, value: unknown): string {
 const lastHbSeq: Record<string, { seq: number; changed: number }> = {};
 
 function HeartbeatIndicator({ ecu }: { ecu: EcuState }) {
-  const guestState = ecu.diagnostics.guest_state as string | undefined;
-  const hbSeq = ecu.diagnostics.heartbeat_seq as number | undefined;
+  const hbSeq = ecu.hbSeq;
 
-  if (!guestState || guestState === "offline") {
+  // ready=false (or absent) → the guest can't answer SOVD requests.
+  if (ecu.ready !== true) {
     return (
-      <div className="heartbeat-indicator offline" title="VM offline">
+      <div
+        className="heartbeat-indicator offline"
+        title={ecu.ready === false ? "Guest not ready" : "No runtime status"}
+      >
         <div className="hb-dot" />
         <span className="hb-label">Offline</span>
       </div>
     );
   }
 
-  // Track heartbeat freshness
+  // ready=true → cross-check heartbeat freshness. Reset the staleness timer
+  // whenever hb_seq advances; if it stops moving for >5s the guest is frozen.
   const now = Date.now();
-  const prev = lastHbSeq[ecu.id];
   if (hbSeq !== undefined) {
+    const prev = lastHbSeq[ecu.id];
     if (!prev || prev.seq !== hbSeq) {
       lastHbSeq[ecu.id] = { seq: hbSeq, changed: now };
     }
-  }
-  const lastChange = lastHbSeq[ecu.id]?.changed ?? 0;
-  const stale = now - lastChange > 5000;
-
-  if (guestState === "running" && !stale) {
+    const stale = now - (lastHbSeq[ecu.id]?.changed ?? now) > 5000;
+    if (stale) {
+      return (
+        <div className="heartbeat-indicator frozen" title={`Heartbeat frozen at #${hbSeq}`}>
+          <div className="hb-dot" />
+          <span className="hb-label">Frozen</span>
+        </div>
+      );
+    }
     return (
       <div className="heartbeat-indicator alive" title={`Running — HB #${hbSeq}`}>
         <div className="hb-dot pulse" />
         <span className="hb-label">Running</span>
+        <span className="hb-seq">#{hbSeq}</span>
       </div>
     );
   }
 
-  if (stale && guestState === "running") {
-    return (
-      <div className="heartbeat-indicator frozen" title={`Heartbeat frozen at #${hbSeq}`}>
-        <div className="hb-dot" />
-        <span className="hb-label">Frozen</span>
-      </div>
-    );
-  }
-
-  // booting, degraded, shutting_down, etc.
-  const label = guestState.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  // ready, but no heartbeat telemetry (e.g. a non-heartbeat component).
   return (
-    <div className="heartbeat-indicator transitioning" title={`${label} — HB #${hbSeq ?? "?"}`}>
-      <div className="hb-dot" />
-      <span className="hb-label">{label}</span>
+    <div className="heartbeat-indicator alive" title="Ready">
+      <div className="hb-dot pulse" />
+      <span className="hb-label">Running</span>
     </div>
   );
 }
@@ -331,7 +343,13 @@ function EcuRow({ ecu }: { ecu: EcuState }) {
           </div>
           <div className="field">
             <span className="field-label">Boot Count</span>
-            <span className="field-value">{formatDiagValue("boot_count", ecu.diagnostics.boot_count)}</span>
+            <span className="field-value">{ecu.bootCount ?? "-"}</span>
+          </div>
+          <div className="field">
+            <span className="field-label">Lifetime</span>
+            <span className="field-value mono" title="x-sumo-runtime.boot_id — per-lifetime nonce; changes on every (re)boot">
+              {ecu.bootId ?? "-"}
+            </span>
           </div>
           <div className="field">
             <span className="field-label">Bank</span>

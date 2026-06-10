@@ -434,6 +434,12 @@
   white-space: nowrap;
 }
 
+.hb-seq {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .heartbeat-indicator.alive .hb-dot {
   background: var(--success);
   box-shadow: 0 0 6px var(--success);

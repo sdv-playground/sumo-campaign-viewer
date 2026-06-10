@@ -16,6 +16,9 @@ chrono = "0.4"
 # wire landed the (current) orchestrator was built against a stale FlashClient.
 # One https source per crate; no local patch (SOVDd + sumo-sovd are pushed).
 sovd-client = { git = "https://github.com/sdv-playground/SOVDd.git", branch = "main" }
+# sovd-core: the EntityStatus/EntityStatusBody wire types for the converged
+# /status endpoint (read_status). Same https source as sovd-client.
+sovd-core = { git = "https://github.com/sdv-playground/SOVDd.git", branch = "main" }
 
 # SUIT manifest parsing
 sumo-onboard = { git = "https://github.com/tr-sdv-sandbox/sumo-rs.git", branch = "main" }
