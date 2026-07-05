@@ -371,7 +371,11 @@ fn diff_ecu_status(prev: Option<&EcuStatus>, next: &EcuStatus, changes: &mut Vec
     // old `heartbeat_seq`); `ready`, the reboot witness `boot_id`, and the NV
     // `boot_count` are rare, meaningful transitions worth a log line.
     let ready_label = |r: Option<bool>| r.map(|b| if b { "ready" } else { "notReady" });
-    check("Health", ready_label(prev.and_then(|p| p.ready)), ready_label(next.ready));
+    check(
+        "Health",
+        ready_label(prev.and_then(|p| p.ready)),
+        ready_label(next.ready),
+    );
 
     let prev_boot_id = prev.and_then(|p| p.boot_id).map(|v| v.to_string());
     let next_boot_id = next.boot_id.map(|v| v.to_string());
@@ -379,7 +383,11 @@ fn diff_ecu_status(prev: Option<&EcuStatus>, next: &EcuStatus, changes: &mut Vec
 
     let prev_boot_count = prev.and_then(|p| p.boot_count).map(|v| v.to_string());
     let next_boot_count = next.boot_count.map(|v| v.to_string());
-    check("Boot Count", prev_boot_count.as_deref(), next_boot_count.as_deref());
+    check(
+        "Boot Count",
+        prev_boot_count.as_deref(),
+        next_boot_count.as_deref(),
+    );
 
     // Diagnostics (bank/security DIDs — all slow-changing, so log every change)
     let prev_diag = prev.map(|p| &p.diagnostics);
