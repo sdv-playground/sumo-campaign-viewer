@@ -21,9 +21,9 @@ sovd-client = { git = "https://github.com/sdv-playground/SOVDd.git", branch = "m
 sovd-core = { git = "https://github.com/sdv-playground/SOVDd.git", branch = "main" }
 
 # SUIT manifest parsing
-sumo-onboard = { git = "https://github.com/tr-sdv-sandbox/sumo-rs.git", tag = "v0.1.1" }
-sumo-crypto = { git = "https://github.com/tr-sdv-sandbox/sumo-rs.git", tag = "v0.1.1" }
-sumo-codec = { git = "https://github.com/tr-sdv-sandbox/sumo-rs.git", tag = "v0.1.1" }
+sumo-onboard = { git = "https://github.com/tr-sdv-sandbox/sumo-rs.git", tag = "v0.1.2" }
+sumo-crypto = { git = "https://github.com/tr-sdv-sandbox/sumo-rs.git", tag = "v0.1.2" }
+sumo-codec = { git = "https://github.com/tr-sdv-sandbox/sumo-rs.git", tag = "v0.1.2" }
 
 # Campaign orchestrator (drive mode)
 sumo-sovd-orchestrator = { git = "https://github.com/sdv-playground/sumo-sovd.git", branch = "main" }
