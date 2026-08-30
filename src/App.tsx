@@ -19,9 +19,9 @@ interface EcuState {
   diagnostics: Record<string, unknown>;
   // Guest liveness from the converged /status endpoint (ISO 17978-3 §7.19.2).
   ready?: boolean; // status: ready (true) / notReady (false)
-  bootId?: number; // x-sumo-runtime.boot_id — per-lifetime nonce (reboot signal)
-  hbSeq?: number; // x-sumo-runtime.hb_seq — heartbeat liveness counter
-  bootCount?: number; // x-sumo-runtime.boot_count — NV reset metric
+  bootId?: number; // x-runtime.boot_id — per-lifetime nonce (reboot signal)
+  hbSeq?: number; // x-runtime.hb_seq — heartbeat liveness counter
+  bootCount?: number; // x-runtime.boot_count — NV reset metric
 }
 
 interface StateChange {
@@ -347,7 +347,7 @@ function EcuRow({ ecu }: { ecu: EcuState }) {
           </div>
           <div className="field">
             <span className="field-label">Lifetime</span>
-            <span className="field-value mono" title="x-sumo-runtime.boot_id — per-lifetime nonce; changes on every (re)boot">
+            <span className="field-value mono" title="x-runtime.boot_id — per-lifetime nonce; changes on every (re)boot">
               {ecu.bootId ?? "-"}
             </span>
           </div>

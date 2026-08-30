@@ -47,13 +47,13 @@ pub struct EcuStatus {
     /// (ISO 17978-3 §7.19.2): `Some(true)` = `ready`, `Some(false)` =
     /// `notReady`, `None` = `/status` unreachable (no liveness signal).
     pub ready: Option<bool>,
-    /// `/status` `x-sumo-runtime.boot_id` — per-guest-lifetime nonce; a
+    /// `/status` `x-runtime.boot_id` — per-guest-lifetime nonce; a
     /// changed value is the canonical (re)boot witness.
     pub boot_id: Option<u32>,
-    /// `/status` `x-sumo-runtime.hb_seq` — heartbeat liveness counter
+    /// `/status` `x-runtime.hb_seq` — heartbeat liveness counter
     /// (advances ~1/s while the guest is alive).
     pub hb_seq: Option<u32>,
-    /// `/status` `x-sumo-runtime.boot_count` — NV reset metric.
+    /// `/status` `x-runtime.boot_count` — NV reset metric.
     pub boot_count: Option<u64>,
 }
 
@@ -255,7 +255,7 @@ async fn parse_manifest(data: Vec<u8>) -> Result<ManifestInfo, String> {
 ///
 /// Repurposed for the ISO 17978-3 §7.18 wire: attaches to the latest
 /// `/updates` entry on the component and returns its `UpdateStatusBody`
-/// (`{phase, status, progress?, step?, error?, x-sumo-substate?}`) as
+/// (`{phase, status, progress?, step?, error?, x-ota-substate?}`) as
 /// JSON. If the component has no updates, returns JSON `null`.
 #[tauri::command]
 async fn get_activation(
@@ -474,7 +474,7 @@ async fn poll_single_ecu(server_url: &str, sovd_client: &SovdClient, ecu: &EcuIn
     let diagnostics = read_diagnostics(sovd_client, ecu).await;
 
     // Guest liveness ← the converged `/status` endpoint (ISO 17978-3 §7.19.2):
-    // standard ready/notReady + the vendor `x-sumo-runtime` block.
+    // standard ready/notReady + the vendor `x-runtime` block.
     let runtime = read_runtime_status(sovd_client, ecu).await;
 
     EcuStatus {
@@ -505,7 +505,7 @@ struct RuntimeStatus {
 
 /// Read a component's runtime status from the converged `/status` endpoint
 /// (ISO 17978-3 §7.19.2): the standard `ready`/`notReady` plus the vendor
-/// `x-sumo-runtime` block (`boot_id`, `hb_seq`, `boot_count`).
+/// `x-runtime` block (`boot_id`, `hb_seq`, `boot_count`).
 ///
 /// `/status` is a top-level entity resource — there is no sub-entity
 /// `GET /apps/{id}/status` read on the SOVD wire — so this addresses the
@@ -517,7 +517,7 @@ async fn read_runtime_status(client: &SovdClient, ecu: &EcuInfo) -> RuntimeStatu
         Ok(b) => b,
         Err(_) => return RuntimeStatus::default(),
     };
-    let runtime = body.extensions.get("x-sumo-runtime");
+    let runtime = body.extensions.get("x-runtime");
     let field_u64 = |key: &str| runtime.and_then(|r| r.get(key)).and_then(|v| v.as_u64());
     RuntimeStatus {
         ready: Some(matches!(body.status, EntityStatus::Ready)),
